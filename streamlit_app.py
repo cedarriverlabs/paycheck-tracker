@@ -81,7 +81,7 @@ TYPICAL_AMOUNTS = {
     "Windows (5th) (BP)": 301.46,
     "Ravi (7th) (MT)": 709.27,
     "Truck (15th) (MT)": 659.29,
-    "Extra Credit Card (BP) (MT)": 100.00,
+    "Extra Credit Card (BP) (MT)": 0.0,  # user fills this every period
 }
 
 def money(amount):
@@ -94,19 +94,25 @@ def get_current_period():
     return None
 
 def extract_due_day(name: str):
-    """Extract the day number from names like 'iCloud (1st) (AP)' or 'Truck (15th) (MT)'. Returns int or None."""
     match = re.search(r"\((\d{1,2})(?:st|nd|rd|th)?\)", name)
     if match:
         return int(match.group(1))
     return None
 
+def get_payment_type(name: str) -> str:
+    """Return 'Auto-pay', 'Manual', or 'Every period'."""
+    if "Extra Credit Card" in name:
+        return "Every period"
+    if "(AP)" in name:
+        return "Auto-pay"
+    if "(BP)" in name or "(MT)" in name:
+        return "Manual"
+    return "Manual"
+
 def is_due_in_period(name: str, period_start: date, period_end: date) -> bool:
-    """Return True if the due day in the name falls within the period dates."""
     day = extract_due_day(name)
     if day is None:
         return False
-
-    # Check every date in the period
     current = period_start
     while current <= period_end:
         if current.day == day:
@@ -123,18 +129,27 @@ def calculate_summary(period_id):
     return {**totals, "leftover": leftover, "total_out": totals["Bills"] + totals["Debt"] + totals["Expenses"] + totals["Savings"]}
 
 def get_auto_items_for_period(period):
-    """Return list of (category, subcategory, amount) that should auto-populate for this period."""
+    """Return list of (category, subcategory, amount, payment_type) for this period."""
     existing = {(t["category"], t["subcategory"]) for t in st.session_state.transactions if t["period_id"] == period["id"]}
     items = []
+
     for cat, subs in CATEGORIES.items():
-        if cat not in ("Bills", "Debt"):  # only auto bills and debt for now
+        if cat not in ("Bills", "Debt"):
             continue
         for sub in subs:
             if (cat, sub) in existing:
                 continue
+
+            # Always include Extra Credit Card
+            if "Extra Credit Card" in sub:
+                items.append((cat, sub, TYPICAL_AMOUNTS.get(sub, 0.0), "Every period"))
+                continue
+
+            # Include if due day falls in this period
             if is_due_in_period(sub, period["start"], period["end"]):
-                amt = TYPICAL_AMOUNTS.get(sub, 0.0)
-                items.append((cat, sub, amt))
+                ptype = get_payment_type(sub)
+                items.append((cat, sub, TYPICAL_AMOUNTS.get(sub, 0.0), ptype))
+
     return items
 
 # ---------- Login ----------
@@ -217,35 +232,37 @@ if page == "Current Paycheck":
     # Auto-populate section
     auto_items = get_auto_items_for_period(period)
     if auto_items:
-        st.subheader("📅 Bills due this period (auto-detected)")
-        st.caption("These items have a due day that falls inside this paycheck period.")
+        st.subheader("📅 Items for this period")
+        st.caption("Auto-detected by due day + Extra Credit Card (always shown). AP = Auto-pay · BP/MT = Manual")
 
-        for i, (cat, sub, amt) in enumerate(auto_items):
-            cols = st.columns([3, 2, 1])
+        for i, (cat, sub, amt, ptype) in enumerate(auto_items):
+            cols = st.columns([3.5, 1.5, 1.5, 1])
             cols[0].write(f"**{sub}**  \n{cat}")
-            new_amt = cols[1].number_input("Amount", value=float(amt), key=f"auto_{i}", label_visibility="collapsed")
-            if cols[2].button("Add", key=f"add_auto_{i}"):
+            cols[1].write(ptype)
+            new_amt = cols[2].number_input("Amount", value=float(amt), key=f"auto_{i}", label_visibility="collapsed", min_value=0.0)
+            if cols[3].button("Add", key=f"add_auto_{i}"):
                 st.session_state.transactions.append({
                     "period_id": period["id"],
                     "date": period["start"],
                     "amount": new_amt,
                     "category": cat,
                     "subcategory": sub,
-                    "description": "Auto-populated from due date",
-                    "method": "Credit Card"
+                    "description": f"{ptype}",
+                    "method": "Credit Card" if ptype == "Auto-pay" else "Manual"
                 })
                 st.rerun()
 
-        if st.button("➕ Add all due items", type="primary"):
-            for cat, sub, amt in auto_items:
+        if st.button("➕ Add all listed items", type="primary"):
+            for cat, sub, amt, ptype in auto_items:
+                # For Extra Credit Card with 0 amount, still add it so user can edit later if needed
                 st.session_state.transactions.append({
                     "period_id": period["id"],
                     "date": period["start"],
                     "amount": amt,
                     "category": cat,
                     "subcategory": sub,
-                    "description": "Auto-populated from due date",
-                    "method": "Credit Card"
+                    "description": ptype,
+                    "method": "Credit Card" if ptype == "Auto-pay" else "Manual"
                 })
             st.rerun()
 
@@ -365,7 +382,8 @@ elif page == "Settings":
     st.divider()
     st.markdown("""
     **Paycheck Tracker**  
-    Focus: clear leftover after bills each paycheck period.  
-    Bills with a day number in parentheses are auto-detected when that day falls inside the current period.  
-    Data is currently in memory (resets on service restart). Permanent database coming next.
+    - **(AP)** = Auto-pay  
+    - **(BP)** or **(MT)** = Manual payment  
+    - **Extra Credit Card** always appears every period (you enter the amount)  
+    Data is currently in memory (resets on service restart).
     """)
