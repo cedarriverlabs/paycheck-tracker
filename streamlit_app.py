@@ -81,7 +81,7 @@ TYPICAL_AMOUNTS = {
     "Windows (5th) (BP)": 301.46,
     "Ravi (7th) (MT)": 709.27,
     "Truck (15th) (MT)": 659.29,
-    "Extra Credit Card (BP) (MT)": 0.0,  # user fills this every period
+    "Extra Credit Card (BP) (MT)": 0.0,
 }
 
 def money(amount):
@@ -100,7 +100,6 @@ def extract_due_day(name: str):
     return None
 
 def get_payment_type(name: str) -> str:
-    """Return 'Auto-pay', 'Manual', or 'Every period'."""
     if "Extra Credit Card" in name:
         return "Every period"
     if "(AP)" in name:
@@ -129,7 +128,6 @@ def calculate_summary(period_id):
     return {**totals, "leftover": leftover, "total_out": totals["Bills"] + totals["Debt"] + totals["Expenses"] + totals["Savings"]}
 
 def get_auto_items_for_period(period):
-    """Return list of (category, subcategory, amount, payment_type) for this period."""
     existing = {(t["category"], t["subcategory"]) for t in st.session_state.transactions if t["period_id"] == period["id"]}
     items = []
 
@@ -140,12 +138,10 @@ def get_auto_items_for_period(period):
             if (cat, sub) in existing:
                 continue
 
-            # Always include Extra Credit Card
             if "Extra Credit Card" in sub:
                 items.append((cat, sub, TYPICAL_AMOUNTS.get(sub, 0.0), "Every period"))
                 continue
 
-            # Include if due day falls in this period
             if is_due_in_period(sub, period["start"], period["end"]):
                 ptype = get_payment_type(sub)
                 items.append((cat, sub, TYPICAL_AMOUNTS.get(sub, 0.0), ptype))
@@ -210,7 +206,6 @@ if page == "Current Paycheck":
 
     summary = calculate_summary(period["id"])
 
-    # Big leftover card
     color = "#0f9d58" if summary["leftover"] >= 0 else "#d93025"
     st.markdown(f"""
     <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px 28px;margin:20px 0;border:1px solid #2a2a4a;">
@@ -233,28 +228,31 @@ if page == "Current Paycheck":
     auto_items = get_auto_items_for_period(period)
     if auto_items:
         st.subheader("📅 Items for this period")
-        st.caption("Auto-detected by due day + Extra Credit Card (always shown). AP = Auto-pay · BP/MT = Manual")
+        st.caption("AP = Auto-pay · BP/MT = Manual · Extra Credit Card always appears")
 
         for i, (cat, sub, amt, ptype) in enumerate(auto_items):
-            cols = st.columns([3.5, 1.5, 1.5, 1])
+            cols = st.columns([3.2, 1.3, 1.5, 1])
             cols[0].write(f"**{sub}**  \n{cat}")
             cols[1].write(ptype)
             new_amt = cols[2].number_input("Amount", value=float(amt), key=f"auto_{i}", label_visibility="collapsed", min_value=0.0)
             if cols[3].button("Add", key=f"add_auto_{i}"):
+                # Manual items start as Pending, Auto-pay start as Paid
+                status = "Paid" if ptype == "Auto-pay" else "Pending"
                 st.session_state.transactions.append({
                     "period_id": period["id"],
                     "date": period["start"],
                     "amount": new_amt,
                     "category": cat,
                     "subcategory": sub,
-                    "description": f"{ptype}",
-                    "method": "Credit Card" if ptype == "Auto-pay" else "Manual"
+                    "description": ptype,
+                    "method": "Credit Card" if ptype == "Auto-pay" else "Manual",
+                    "status": status
                 })
                 st.rerun()
 
         if st.button("➕ Add all listed items", type="primary"):
             for cat, sub, amt, ptype in auto_items:
-                # For Extra Credit Card with 0 amount, still add it so user can edit later if needed
+                status = "Paid" if ptype == "Auto-pay" else "Pending"
                 st.session_state.transactions.append({
                     "period_id": period["id"],
                     "date": period["start"],
@@ -262,22 +260,44 @@ if page == "Current Paycheck":
                     "category": cat,
                     "subcategory": sub,
                     "description": ptype,
-                    "method": "Credit Card" if ptype == "Auto-pay" else "Manual"
+                    "method": "Credit Card" if ptype == "Auto-pay" else "Manual",
+                    "status": status
                 })
             st.rerun()
 
     st.divider()
+
+    # Transactions with status
     st.subheader("Transactions this period")
     period_txns = [t for t in st.session_state.transactions if t["period_id"] == period["id"]]
-    if not period_txns:
-        st.info("No transactions yet.")
-    else:
-        for t in sorted(period_txns, key=lambda x: x["date"], reverse=True):
-            cols = st.columns([1.5, 3, 2, 1.5])
+
+    # Show Pending first (the ones you care about)
+    pending = [t for t in period_txns if t.get("status") == "Pending"]
+    paid = [t for t in period_txns if t.get("status") == "Paid"]
+
+    if pending:
+        st.markdown("#### 🔴 Still need to pay (Pending)")
+        for idx, t in enumerate(sorted(pending, key=lambda x: x["date"])):
+            cols = st.columns([1.4, 3, 1.5, 1.3, 1.2])
             cols[0].write(t["date"].strftime("%b %d"))
             cols[1].write(f"**{t['subcategory']}**")
             cols[2].write(t["category"])
             cols[3].write(money(t["amount"]))
+            if cols[4].button("Mark Paid", key=f"paid_{t['subcategory']}_{idx}"):
+                t["status"] = "Paid"
+                st.rerun()
+
+    if paid:
+        st.markdown("#### ✅ Paid")
+        for t in sorted(paid, key=lambda x: x["date"], reverse=True):
+            cols = st.columns([1.4, 3, 1.5, 1.3])
+            cols[0].write(t["date"].strftime("%b %d"))
+            cols[1].write(f"**{t['subcategory']}**")
+            cols[2].write(t["category"])
+            cols[3].write(money(t["amount"]))
+
+    if not period_txns:
+        st.info("No transactions yet.")
 
 # ---------- Add Transaction ----------
 elif page == "Add Transaction":
@@ -296,6 +316,7 @@ elif page == "Add Transaction":
 
         description = st.text_input("Description (optional)")
         method = st.selectbox("Payment method", ["Credit Card", "Auto-pay", "Manual / Bank", "Cash", "Other"])
+        status = st.selectbox("Status", ["Pending", "Paid"], index=0)
 
         if st.form_submit_button("Save Transaction", type="primary", use_container_width=True):
             if amount <= 0:
@@ -308,7 +329,8 @@ elif page == "Add Transaction":
                     "category": category,
                     "subcategory": subcategory,
                     "description": description,
-                    "method": method
+                    "method": method,
+                    "status": status
                 })
                 st.success(f"Saved {money(amount)} — {subcategory}")
                 st.balloons()
@@ -343,6 +365,7 @@ elif page == "Past Periods":
             "Category": t["category"],
             "Subcategory": t["subcategory"],
             "Amount": t["amount"],
+            "Status": t.get("status", ""),
             "Method": t.get("method", "")
         } for t in txns])
         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -367,6 +390,7 @@ elif page == "Search":
             "Category": t["category"],
             "Subcategory": t["subcategory"],
             "Amount": t["amount"],
+            "Status": t.get("status", ""),
             "Method": t.get("method", "")
         } for t in results])
         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -382,8 +406,10 @@ elif page == "Settings":
     st.divider()
     st.markdown("""
     **Paycheck Tracker**  
-    - **(AP)** = Auto-pay  
-    - **(BP)** or **(MT)** = Manual payment  
-    - **Extra Credit Card** always appears every period (you enter the amount)  
-    Data is currently in memory (resets on service restart).
+    - **(AP)** = Auto-pay → starts as Paid  
+    - **(BP)** or **(MT)** = Manual → starts as Pending  
+    - **Extra Credit Card** always appears every period  
+    - Click **Mark Paid** on any Pending item when you pay it  
+    
+    Next: Gmail monitoring to auto-mark payments as Paid when confirmation emails arrive.
     """)
