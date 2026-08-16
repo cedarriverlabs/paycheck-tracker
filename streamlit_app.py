@@ -1,18 +1,326 @@
 import streamlit as st
+from datetime import date, timedelta
+import pandas as pd
 
-st.set_page_config(page_title="Paycheck Tracker", page_icon="💰")
+st.set_page_config(
+    page_title="Paycheck Tracker",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("💰 Paycheck Tracker")
-st.write("If you can see this message, the app is working.")
+# ---------- Simple in-memory storage (will be replaced with real DB later) ----------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "periods" not in st.session_state:
+    st.session_state.periods = []
+if "transactions" not in st.session_state:
+    st.session_state.transactions = []
+if "current_period_id" not in st.session_state:
+    st.session_state.current_period_id = None
 
-st.divider()
+# Seed a starting period if none exists
+if not st.session_state.periods:
+    start = date(2026, 8, 14)
+    end = date(2026, 8, 27)
+    st.session_state.periods.append({
+        "id": 1,
+        "start": start,
+        "end": end,
+        "label": f"{start.strftime('%b %d')} – {end.strftime('%b %d')}",
+        "is_current": True
+    })
+    st.session_state.current_period_id = 1
 
-username = st.text_input("Username", value="doug")
-password = st.text_input("Password", type="password")
+# ---------- Categories from your spreadsheet ----------
+CATEGORIES = {
+    "Income": ["Doug Paycheck", "Amanda Paycheck", "Doug Bonus", "Amanda Bonus", "Doug VA"],
+    "Savings": ["Emergency Fund (MT)"],
+    "Bills": [
+        "Child Support (MT)", "iCloud (1st) (AP)", "Paramount+ (4th) (AP)", "Spotify (5th) (AP)",
+        "Netflix (5th) (AP)", "Cell Phone (9th) (AP)", "OnStar (11th) (AP)", "REMC Fiber (12th) (AP)",
+        "Microsoft (12th) (AP)", "Nest (16th) (AP)", "Sallie Mae (16th) (BP)", "REMC (17th) (AP)",
+        "Beach Body (17th) (AP)", "Life 360 (17th) (AP)", "Hulu (19th) (AP)", "Sewage (22nd) (AP)",
+        "Insurance (23rd) (AP)", "Amazon CC (23rd) (BP)", "Youtube TV (23rd) (AP)", "Water (26th) (AP)",
+        "NIPSCO (26th) (BP)", "Peacock (28th) (AP)", "Spotify (29th) (AP)"
+    ],
+    "Expenses": ["Groceries", "Gas", "Other"],
+    "Debt": [
+        "Mortgage (1st) (BP)", "Windows (5th) (BP)", "Ravi (7th) (MT)",
+        "Truck (15th) (MT)", "Extra Truck (MT)", "Extra Credit Card (BP) (MT)"
+    ]
+}
 
-if st.button("Log in"):
-    if username == "doug" and password == "change-me":
-        st.success("Login works!")
-        st.balloons()
+TYPICAL_AMOUNTS = {
+    "Doug Paycheck": 3639.45,
+    "Amanda Paycheck": 1295.65,
+    "Child Support (MT)": 680.00,
+    "iCloud (1st) (AP)": 9.99,
+    "Spotify (5th) (AP)": 16.99,
+    "Netflix (5th) (AP)": 19.99,
+    "Cell Phone (9th) (AP)": 425.00,
+    "OnStar (11th) (AP)": 14.99,
+    "REMC Fiber (12th) (AP)": 80.44,
+    "Microsoft (12th) (AP)": 21.39,
+    "Nest (16th) (AP)": 15.00,
+    "Sallie Mae (16th) (BP)": 40.00,
+    "REMC (17th) (AP)": 150.00,
+    "Beach Body (17th) (AP)": 15.95,
+    "Life 360 (17th) (AP)": 16.04,
+    "Hulu (19th) (AP)": 19.95,
+    "Sewage (22nd) (AP)": 71.00,
+    "Insurance (23rd) (AP)": 246.19,
+    "Amazon CC (23rd) (BP)": 200.00,
+    "Youtube TV (23rd) (AP)": 120.00,
+    "Water (26th) (AP)": 85.00,
+    "NIPSCO (26th) (BP)": 47.00,
+    "Peacock (28th) (AP)": 11.99,
+    "Spotify (29th) (AP)": 19.99,
+    "Mortgage (1st) (BP)": 2206.90,
+    "Windows (5th) (BP)": 301.46,
+    "Ravi (7th) (MT)": 709.27,
+    "Truck (15th) (MT)": 659.29,
+    "Extra Credit Card (BP) (MT)": 100.00,
+}
+
+def money(amount):
+    return f"${amount:,.2f}"
+
+def get_current_period():
+    for p in st.session_state.periods:
+        if p["is_current"]:
+            return p
+    return None
+
+def calculate_summary(period_id):
+    totals = {"Income": 0.0, "Savings": 0.0, "Bills": 0.0, "Expenses": 0.0, "Debt": 0.0}
+    for t in st.session_state.transactions:
+        if t["period_id"] == period_id:
+            totals[t["category"]] += t["amount"]
+    leftover = totals["Income"] - totals["Bills"] - totals["Debt"] - totals["Expenses"] - totals["Savings"]
+    return {**totals, "leftover": leftover, "total_out": totals["Bills"] + totals["Debt"] + totals["Expenses"] + totals["Savings"]}
+
+# ---------- Login ----------
+def login_screen():
+    st.title("💰 Paycheck Tracker")
+    st.markdown("### Sign in")
+    with st.form("login_form"):
+        username = st.text_input("Username", value="doug")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Log in", use_container_width=True):
+            if username == "doug" and password == "change-me":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+
+if not st.session_state.authenticated:
+    login_screen()
+    st.stop()
+
+# ---------- Sidebar ----------
+with st.sidebar:
+    st.title("💰 Paycheck Tracker")
+    st.caption("Signed in as **doug**")
+    st.divider()
+    page = st.radio("Navigate", ["Current Paycheck", "Add Transaction", "Past Periods", "Search", "Settings"], label_visibility="collapsed")
+    st.divider()
+    if st.button("Log out", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
+
+# ---------- Current Paycheck ----------
+if page == "Current Paycheck":
+    period = get_current_period()
+    st.header("Current Paycheck")
+    st.subheader(period["label"])
+    st.caption(f"{period['start'].strftime('%b %d, %Y')} → {period['end'].strftime('%b %d, %Y')}")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("➕ Create next period", use_container_width=True):
+            last = period
+            new_start = last["end"] + timedelta(days=1)
+            length = (last["end"] - last["start"]).days
+            new_end = new_start + timedelta(days=length)
+            new_id = max([p["id"] for p in st.session_state.periods]) + 1
+            for p in st.session_state.periods:
+                p["is_current"] = False
+            st.session_state.periods.append({
+                "id": new_id,
+                "start": new_start,
+                "end": new_end,
+                "label": f"{new_start.strftime('%b %d')} – {new_end.strftime('%b %d')}",
+                "is_current": True
+            })
+            st.session_state.current_period_id = new_id
+            st.rerun()
+
+    summary = calculate_summary(period["id"])
+
+    # Big leftover card
+    color = "#0f9d58" if summary["leftover"] >= 0 else "#d93025"
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px 28px;margin:20px 0;border:1px solid #2a2a4a;">
+        <div style="color:#aaa;font-size:0.9rem;">Leftover this paycheck</div>
+        <div style="color:{color};font-size:2.6rem;font-weight:700;">{money(summary['leftover'])}</div>
+        <div style="color:#888;font-size:0.85rem;margin-top:8px;">Income {money(summary['Income'])} − Outgoing {money(summary['total_out'])}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Income", money(summary["Income"]))
+    c2.metric("Bills", money(summary["Bills"]))
+    c3.metric("Debt", money(summary["Debt"]))
+    c4.metric("Expenses", money(summary["Expenses"]))
+    c5.metric("Savings", money(summary["Savings"]))
+
+    st.divider()
+    st.subheader("Transactions this period")
+    period_txns = [t for t in st.session_state.transactions if t["period_id"] == period["id"]]
+    if not period_txns:
+        st.info("No transactions yet. Go to **Add Transaction** or pre-load recurrings below.")
     else:
-        st.error("Wrong credentials")
+        for t in sorted(period_txns, key=lambda x: x["date"], reverse=True):
+            cols = st.columns([1.5, 3, 2, 1.5])
+            cols[0].write(t["date"].strftime("%b %d"))
+            cols[1].write(f"**{t['subcategory']}**")
+            cols[2].write(t["category"])
+            cols[3].write(money(t["amount"]))
+
+    # Recurring suggestions
+    st.divider()
+    with st.expander("💡 Suggested recurring items (pre-load)"):
+        existing = {(t["category"], t["subcategory"]) for t in period_txns}
+        suggestions = []
+        for cat, subs in CATEGORIES.items():
+            for sub in subs:
+                if (cat, sub) not in existing and sub in TYPICAL_AMOUNTS:
+                    suggestions.append((cat, sub, TYPICAL_AMOUNTS[sub]))
+
+        if not suggestions:
+            st.write("All recurring items already added for this period.")
+        else:
+            for i, (cat, sub, amt) in enumerate(suggestions):
+                cols = st.columns([3, 2, 1])
+                cols[0].write(f"**{sub}**  \n{cat}")
+                new_amt = cols[1].number_input("Amount", value=float(amt), key=f"sug_{i}", label_visibility="collapsed")
+                if cols[2].checkbox("Add", key=f"chk_{i}"):
+                    st.session_state.transactions.append({
+                        "period_id": period["id"],
+                        "date": period["start"],
+                        "amount": new_amt,
+                        "category": cat,
+                        "subcategory": sub,
+                        "description": "Pre-loaded recurring",
+                        "method": "Credit Card"
+                    })
+                    st.rerun()
+
+# ---------- Add Transaction ----------
+elif page == "Add Transaction":
+    st.header("Add Transaction")
+    period = get_current_period()
+    st.caption(f"Adding to: **{period['label']}**")
+
+    with st.form("add_txn", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            txn_date = st.date_input("Date", value=date.today())
+            category = st.selectbox("Category", list(CATEGORIES.keys()))
+        with col2:
+            amount = st.number_input("Amount", min_value=0.0, step=0.01, format="%.2f")
+            subcategory = st.selectbox("Subcategory", CATEGORIES[category])
+
+        description = st.text_input("Description (optional)")
+        method = st.selectbox("Payment method", ["Credit Card", "Auto-pay", "Manual / Bank", "Cash", "Other"])
+
+        if st.form_submit_button("Save Transaction", type="primary", use_container_width=True):
+            if amount <= 0:
+                st.error("Amount must be greater than zero")
+            else:
+                st.session_state.transactions.append({
+                    "period_id": period["id"],
+                    "date": txn_date,
+                    "amount": amount,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "description": description,
+                    "method": method
+                })
+                st.success(f"Saved {money(amount)} — {subcategory}")
+                st.balloons()
+
+# ---------- Past Periods ----------
+elif page == "Past Periods":
+    st.header("Past Paycheck Periods")
+    options = {f"{p['label']} {'(current)' if p['is_current'] else ''}": p["id"] for p in st.session_state.periods}
+    choice = st.selectbox("Select period", list(options.keys()))
+    pid = options[choice]
+    summary = calculate_summary(pid)
+
+    color = "#0f9d58" if summary["leftover"] >= 0 else "#d93025"
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px 28px;margin:20px 0;border:1px solid #2a2a4a;">
+        <div style="color:#aaa;font-size:0.9rem;">Leftover</div>
+        <div style="color:{color};font-size:2.4rem;font-weight:700;">{money(summary['leftover'])}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Income", money(summary["Income"]))
+    c2.metric("Bills + Debt", money(summary["Bills"] + summary["Debt"]))
+    c3.metric("Expenses", money(summary["Expenses"]))
+    c4.metric("Savings", money(summary["Savings"]))
+
+    st.subheader("Transactions")
+    txns = [t for t in st.session_state.transactions if t["period_id"] == pid]
+    if txns:
+        df = pd.DataFrame([{
+            "Date": t["date"],
+            "Category": t["category"],
+            "Subcategory": t["subcategory"],
+            "Amount": t["amount"],
+            "Method": t.get("method", "")
+        } for t in txns])
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No transactions in this period.")
+
+# ---------- Search ----------
+elif page == "Search":
+    st.header("Search Transactions")
+    search = st.text_input("Search (subcategory, description, category)")
+    cat_filter = st.selectbox("Category", ["All"] + list(CATEGORIES.keys()))
+
+    results = st.session_state.transactions
+    if search:
+        results = [t for t in results if search.lower() in t["subcategory"].lower() or search.lower() in (t.get("description") or "").lower() or search.lower() in t["category"].lower()]
+    if cat_filter != "All":
+        results = [t for t in results if t["category"] == cat_filter]
+
+    if results:
+        df = pd.DataFrame([{
+            "Date": t["date"],
+            "Category": t["category"],
+            "Subcategory": t["subcategory"],
+            "Amount": t["amount"],
+            "Method": t.get("method", "")
+        } for t in results])
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption(f"{len(results)} results")
+    else:
+        st.info("No matching transactions.")
+
+# ---------- Settings ----------
+elif page == "Settings":
+    st.header("Settings")
+    st.write("**Default login** (change this later when we add real auth):")
+    st.code("Username: doug\nPassword: change-me")
+    st.divider()
+    st.markdown("""
+    **Paycheck Tracker**  
+    Focus: clear leftover after bills each paycheck period.  
+    Data is currently stored in memory (will disappear on restart).  
+    Next step will be connecting a permanent free database.
+    """)
