@@ -19,6 +19,8 @@ if "transactions" not in st.session_state:
     st.session_state.transactions = []
 if "current_period_id" not in st.session_state:
     st.session_state.current_period_id = None
+if "editing_idx" not in st.session_state:
+    st.session_state.editing_idx = None
 
 # Seed a starting period if none exists
 if not st.session_state.periods:
@@ -236,7 +238,6 @@ if page == "Current Paycheck":
             cols[1].write(ptype)
             new_amt = cols[2].number_input("Amount", value=float(amt), key=f"auto_{i}", label_visibility="collapsed", min_value=0.0)
             if cols[3].button("Add", key=f"add_auto_{i}"):
-                # Manual items start as Pending, Auto-pay start as Paid
                 status = "Paid" if ptype == "Auto-pay" else "Pending"
                 st.session_state.transactions.append({
                     "period_id": period["id"],
@@ -267,37 +268,75 @@ if page == "Current Paycheck":
 
     st.divider()
 
-    # Transactions with status
+    # Transactions with status + edit
     st.subheader("Transactions this period")
-    period_txns = [t for t in st.session_state.transactions if t["period_id"] == period["id"]]
+    period_txns = [(i, t) for i, t in enumerate(st.session_state.transactions) if t["period_id"] == period["id"]]
 
-    # Show Pending first (the ones you care about)
-    pending = [t for t in period_txns if t.get("status") == "Pending"]
-    paid = [t for t in period_txns if t.get("status") == "Paid"]
+    pending = [(i, t) for i, t in period_txns if t.get("status") == "Pending"]
+    paid = [(i, t) for i, t in period_txns if t.get("status") == "Paid"]
 
     if pending:
         st.markdown("#### 🔴 Still need to pay (Pending)")
-        for idx, t in enumerate(sorted(pending, key=lambda x: x["date"])):
-            cols = st.columns([1.4, 3, 1.5, 1.3, 1.2])
+        for idx, (orig_idx, t) in enumerate(pending):
+            cols = st.columns([1.3, 2.8, 1.3, 1.2, 1, 1])
             cols[0].write(t["date"].strftime("%b %d"))
             cols[1].write(f"**{t['subcategory']}**")
             cols[2].write(t["category"])
             cols[3].write(money(t["amount"]))
-            if cols[4].button("Mark Paid", key=f"paid_{t['subcategory']}_{idx}"):
-                t["status"] = "Paid"
+            if cols[4].button("Paid", key=f"paid_{orig_idx}"):
+                st.session_state.transactions[orig_idx]["status"] = "Paid"
+                st.rerun()
+            if cols[5].button("Edit", key=f"edit_p_{orig_idx}"):
+                st.session_state.editing_idx = orig_idx
                 st.rerun()
 
     if paid:
         st.markdown("#### ✅ Paid")
-        for t in sorted(paid, key=lambda x: x["date"], reverse=True):
-            cols = st.columns([1.4, 3, 1.5, 1.3])
+        for idx, (orig_idx, t) in enumerate(paid):
+            cols = st.columns([1.3, 2.8, 1.3, 1.2, 1])
             cols[0].write(t["date"].strftime("%b %d"))
             cols[1].write(f"**{t['subcategory']}**")
             cols[2].write(t["category"])
             cols[3].write(money(t["amount"]))
+            if cols[4].button("Edit", key=f"edit_paid_{orig_idx}"):
+                st.session_state.editing_idx = orig_idx
+                st.rerun()
 
     if not period_txns:
         st.info("No transactions yet.")
+
+    # Edit form
+    if st.session_state.editing_idx is not None:
+        t = st.session_state.transactions[st.session_state.editing_idx]
+        st.divider()
+        st.subheader("✏️ Edit Transaction")
+        with st.form("edit_form"):
+            new_date = st.date_input("Date", value=t["date"])
+            new_category = st.selectbox("Category", list(CATEGORIES.keys()), index=list(CATEGORIES.keys()).index(t["category"]))
+            new_sub = st.selectbox("Subcategory", CATEGORIES[new_category], index=CATEGORIES[new_category].index(t["subcategory"]) if t["subcategory"] in CATEGORIES[new_category] else 0)
+            new_amount = st.number_input("Amount", value=float(t["amount"]), min_value=0.0, step=0.01)
+            new_status = st.selectbox("Status", ["Pending", "Paid"], index=0 if t.get("status") == "Pending" else 1)
+            new_desc = st.text_input("Description", value=t.get("description", ""))
+
+            c1, c2, c3 = st.columns(3)
+            if c1.form_submit_button("Save changes", type="primary"):
+                st.session_state.transactions[st.session_state.editing_idx].update({
+                    "date": new_date,
+                    "category": new_category,
+                    "subcategory": new_sub,
+                    "amount": new_amount,
+                    "status": new_status,
+                    "description": new_desc
+                })
+                st.session_state.editing_idx = None
+                st.rerun()
+            if c2.form_submit_button("Cancel"):
+                st.session_state.editing_idx = None
+                st.rerun()
+            if c3.form_submit_button("Delete", type="secondary"):
+                st.session_state.transactions.pop(st.session_state.editing_idx)
+                st.session_state.editing_idx = None
+                st.rerun()
 
 # ---------- Add Transaction ----------
 elif page == "Add Transaction":
@@ -409,7 +448,8 @@ elif page == "Settings":
     - **(AP)** = Auto-pay → starts as Paid  
     - **(BP)** or **(MT)** = Manual → starts as Pending  
     - **Extra Credit Card** always appears every period  
-    - Click **Mark Paid** on any Pending item when you pay it  
+    - Click **Edit** on any transaction to change amount, category, status, or delete it  
+    - Click **Paid** to mark a Pending item as paid  
     
-    Next: Gmail monitoring to auto-mark payments as Paid when confirmation emails arrive.
+    Next: Gmail monitoring to auto-mark payments as Paid.
     """)
