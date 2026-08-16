@@ -2,12 +2,21 @@
 Paycheck Tracker – personal finance app focused on paycheck-to-paycheck leftover.
 """
 
+import sys
+from pathlib import Path
+
+# Ensure the app/ directory is on the path (needed on Streamlit Cloud)
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
 import streamlit as st
 from datetime import date, datetime
 from typing import Optional
 
 from database import init_db
 from auth import authenticate, change_password
+from seed import run_seed
 from services import (
     get_current_period, get_all_periods, get_period_by_id,
     create_next_period, update_period_dates,
@@ -15,7 +24,6 @@ from services import (
     add_transaction, get_transactions, delete_transaction,
     calculate_period_summary, get_recurring_suggestions, preload_recurring,
 )
-from seed import run_seed
 
 
 # ---------- Page config ----------
