@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import date, timedelta
 import pandas as pd
+import re
 
 st.set_page_config(
     page_title="Paycheck Tracker",
@@ -9,7 +10,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ---------- Simple in-memory storage (will be replaced with real DB later) ----------
+# ---------- Simple in-memory storage ----------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "periods" not in st.session_state:
@@ -92,6 +93,27 @@ def get_current_period():
             return p
     return None
 
+def extract_due_day(name: str):
+    """Extract the day number from names like 'iCloud (1st) (AP)' or 'Truck (15th) (MT)'. Returns int or None."""
+    match = re.search(r"\((\d{1,2})(?:st|nd|rd|th)?\)", name)
+    if match:
+        return int(match.group(1))
+    return None
+
+def is_due_in_period(name: str, period_start: date, period_end: date) -> bool:
+    """Return True if the due day in the name falls within the period dates."""
+    day = extract_due_day(name)
+    if day is None:
+        return False
+
+    # Check every date in the period
+    current = period_start
+    while current <= period_end:
+        if current.day == day:
+            return True
+        current += timedelta(days=1)
+    return False
+
 def calculate_summary(period_id):
     totals = {"Income": 0.0, "Savings": 0.0, "Bills": 0.0, "Expenses": 0.0, "Debt": 0.0}
     for t in st.session_state.transactions:
@@ -99,6 +121,21 @@ def calculate_summary(period_id):
             totals[t["category"]] += t["amount"]
     leftover = totals["Income"] - totals["Bills"] - totals["Debt"] - totals["Expenses"] - totals["Savings"]
     return {**totals, "leftover": leftover, "total_out": totals["Bills"] + totals["Debt"] + totals["Expenses"] + totals["Savings"]}
+
+def get_auto_items_for_period(period):
+    """Return list of (category, subcategory, amount) that should auto-populate for this period."""
+    existing = {(t["category"], t["subcategory"]) for t in st.session_state.transactions if t["period_id"] == period["id"]}
+    items = []
+    for cat, subs in CATEGORIES.items():
+        if cat not in ("Bills", "Debt"):  # only auto bills and debt for now
+            continue
+        for sub in subs:
+            if (cat, sub) in existing:
+                continue
+            if is_due_in_period(sub, period["start"], period["end"]):
+                amt = TYPICAL_AMOUNTS.get(sub, 0.0)
+                items.append((cat, sub, amt))
+    return items
 
 # ---------- Login ----------
 def login_screen():
@@ -176,10 +213,47 @@ if page == "Current Paycheck":
     c5.metric("Savings", money(summary["Savings"]))
 
     st.divider()
+
+    # Auto-populate section
+    auto_items = get_auto_items_for_period(period)
+    if auto_items:
+        st.subheader("📅 Bills due this period (auto-detected)")
+        st.caption("These items have a due day that falls inside this paycheck period.")
+
+        for i, (cat, sub, amt) in enumerate(auto_items):
+            cols = st.columns([3, 2, 1])
+            cols[0].write(f"**{sub}**  \n{cat}")
+            new_amt = cols[1].number_input("Amount", value=float(amt), key=f"auto_{i}", label_visibility="collapsed")
+            if cols[2].button("Add", key=f"add_auto_{i}"):
+                st.session_state.transactions.append({
+                    "period_id": period["id"],
+                    "date": period["start"],
+                    "amount": new_amt,
+                    "category": cat,
+                    "subcategory": sub,
+                    "description": "Auto-populated from due date",
+                    "method": "Credit Card"
+                })
+                st.rerun()
+
+        if st.button("➕ Add all due items", type="primary"):
+            for cat, sub, amt in auto_items:
+                st.session_state.transactions.append({
+                    "period_id": period["id"],
+                    "date": period["start"],
+                    "amount": amt,
+                    "category": cat,
+                    "subcategory": sub,
+                    "description": "Auto-populated from due date",
+                    "method": "Credit Card"
+                })
+            st.rerun()
+
+    st.divider()
     st.subheader("Transactions this period")
     period_txns = [t for t in st.session_state.transactions if t["period_id"] == period["id"]]
     if not period_txns:
-        st.info("No transactions yet. Go to **Add Transaction** or pre-load recurrings below.")
+        st.info("No transactions yet.")
     else:
         for t in sorted(period_txns, key=lambda x: x["date"], reverse=True):
             cols = st.columns([1.5, 3, 2, 1.5])
@@ -187,35 +261,6 @@ if page == "Current Paycheck":
             cols[1].write(f"**{t['subcategory']}**")
             cols[2].write(t["category"])
             cols[3].write(money(t["amount"]))
-
-    # Recurring suggestions
-    st.divider()
-    with st.expander("💡 Suggested recurring items (pre-load)"):
-        existing = {(t["category"], t["subcategory"]) for t in period_txns}
-        suggestions = []
-        for cat, subs in CATEGORIES.items():
-            for sub in subs:
-                if (cat, sub) not in existing and sub in TYPICAL_AMOUNTS:
-                    suggestions.append((cat, sub, TYPICAL_AMOUNTS[sub]))
-
-        if not suggestions:
-            st.write("All recurring items already added for this period.")
-        else:
-            for i, (cat, sub, amt) in enumerate(suggestions):
-                cols = st.columns([3, 2, 1])
-                cols[0].write(f"**{sub}**  \n{cat}")
-                new_amt = cols[1].number_input("Amount", value=float(amt), key=f"sug_{i}", label_visibility="collapsed")
-                if cols[2].checkbox("Add", key=f"chk_{i}"):
-                    st.session_state.transactions.append({
-                        "period_id": period["id"],
-                        "date": period["start"],
-                        "amount": new_amt,
-                        "category": cat,
-                        "subcategory": sub,
-                        "description": "Pre-loaded recurring",
-                        "method": "Credit Card"
-                    })
-                    st.rerun()
 
 # ---------- Add Transaction ----------
 elif page == "Add Transaction":
@@ -315,12 +360,12 @@ elif page == "Search":
 # ---------- Settings ----------
 elif page == "Settings":
     st.header("Settings")
-    st.write("**Default login** (change this later when we add real auth):")
+    st.write("**Default login**:")
     st.code("Username: doug\nPassword: change-me")
     st.divider()
     st.markdown("""
     **Paycheck Tracker**  
     Focus: clear leftover after bills each paycheck period.  
-    Data is currently stored in memory (will disappear on restart).  
-    Next step will be connecting a permanent free database.
+    Bills with a day number in parentheses are auto-detected when that day falls inside the current period.  
+    Data is currently in memory (resets on service restart). Permanent database coming next.
     """)
