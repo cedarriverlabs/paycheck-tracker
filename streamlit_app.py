@@ -21,6 +21,14 @@ if "current_period_id" not in st.session_state:
     st.session_state.current_period_id = None
 if "editing_idx" not in st.session_state:
     st.session_state.editing_idx = None
+if "custom_subs" not in st.session_state:
+    st.session_state.custom_subs = {  # category -> list of extra subcategory names
+        "Income": [],
+        "Savings": [],
+        "Bills": [],
+        "Expenses": [],
+        "Debt": []
+    }
 
 # Seed a starting period if none exists
 if not st.session_state.periods:
@@ -35,8 +43,8 @@ if not st.session_state.periods:
     })
     st.session_state.current_period_id = 1
 
-# ---------- Categories from your spreadsheet ----------
-CATEGORIES = {
+# ---------- Base categories from your spreadsheet ----------
+BASE_CATEGORIES = {
     "Income": ["Doug Paycheck", "Amanda Paycheck", "Doug Bonus", "Amanda Bonus", "Doug VA"],
     "Savings": ["Emergency Fund (MT)"],
     "Bills": [
@@ -53,6 +61,13 @@ CATEGORIES = {
         "Truck (15th) (MT)", "Extra Truck (MT)", "Extra Credit Card (BP) (MT)"
     ]
 }
+
+def get_categories():
+    """Return full category dict including any custom subcategories the user has added."""
+    cats = {}
+    for cat, subs in BASE_CATEGORIES.items():
+        cats[cat] = subs + st.session_state.custom_subs.get(cat, [])
+    return cats
 
 TYPICAL_AMOUNTS = {
     "Doug Paycheck": 3639.45,
@@ -130,10 +145,11 @@ def calculate_summary(period_id):
     return {**totals, "leftover": leftover, "total_out": totals["Bills"] + totals["Debt"] + totals["Expenses"] + totals["Savings"]}
 
 def get_auto_items_for_period(period):
+    cats = get_categories()
     existing = {(t["category"], t["subcategory"]) for t in st.session_state.transactions if t["period_id"] == period["id"]}
     items = []
 
-    for cat, subs in CATEGORIES.items():
+    for cat, subs in cats.items():
         if cat not in ("Bills", "Debt"):
             continue
         for sub in subs:
@@ -178,6 +194,8 @@ with st.sidebar:
     if st.button("Log out", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
+
+CATEGORIES = get_categories()
 
 # ---------- Current Paycheck ----------
 if page == "Current Paycheck":
@@ -313,7 +331,9 @@ if page == "Current Paycheck":
         with st.form("edit_form"):
             new_date = st.date_input("Date", value=t["date"])
             new_category = st.selectbox("Category", list(CATEGORIES.keys()), index=list(CATEGORIES.keys()).index(t["category"]))
-            new_sub = st.selectbox("Subcategory", CATEGORIES[new_category], index=CATEGORIES[new_category].index(t["subcategory"]) if t["subcategory"] in CATEGORIES[new_category] else 0)
+            sub_options = CATEGORIES[new_category]
+            sub_index = sub_options.index(t["subcategory"]) if t["subcategory"] in sub_options else 0
+            new_sub = st.selectbox("Subcategory", sub_options, index=sub_index)
             new_amount = st.number_input("Amount", value=float(t["amount"]), min_value=0.0, step=0.01)
             new_status = st.selectbox("Status", ["Pending", "Paid"], index=0 if t.get("status") == "Pending" else 1)
             new_desc = st.text_input("Description", value=t.get("description", ""))
@@ -373,6 +393,24 @@ elif page == "Add Transaction":
                 })
                 st.success(f"Saved {money(amount)} — {subcategory}")
                 st.balloons()
+
+    st.divider()
+    st.subheader("➕ Add a new custom item")
+    st.caption("Use this when you have a new bill, expense, or anything not already in the lists.")
+
+    with st.form("add_custom"):
+        custom_cat = st.selectbox("Category for new item", list(CATEGORIES.keys()), key="custom_cat")
+        custom_name = st.text_input("Name of the new item", placeholder="e.g. New subscription, Vet bill, etc.")
+        if st.form_submit_button("Add to list"):
+            if custom_name.strip():
+                if custom_name.strip() not in st.session_state.custom_subs[custom_cat]:
+                    st.session_state.custom_subs[custom_cat].append(custom_name.strip())
+                    st.success(f"Added **{custom_name}** under {custom_cat}. It will now appear in the dropdowns.")
+                    st.rerun()
+                else:
+                    st.warning("That item already exists.")
+            else:
+                st.error("Please enter a name.")
 
 # ---------- Past Periods ----------
 elif page == "Past Periods":
@@ -443,13 +481,24 @@ elif page == "Settings":
     st.write("**Default login**:")
     st.code("Username: doug\nPassword: change-me")
     st.divider()
+
+    st.subheader("Custom items you have added")
+    has_custom = False
+    for cat, subs in st.session_state.custom_subs.items():
+        if subs:
+            has_custom = True
+            st.write(f"**{cat}**: {', '.join(subs)}")
+    if not has_custom:
+        st.caption("None yet. Add them on the Add Transaction page.")
+
+    st.divider()
     st.markdown("""
     **Paycheck Tracker**  
     - **(AP)** = Auto-pay → starts as Paid  
     - **(BP)** or **(MT)** = Manual → starts as Pending  
     - **Extra Credit Card** always appears every period  
-    - Click **Edit** on any transaction to change amount, category, status, or delete it  
-    - Click **Paid** to mark a Pending item as paid  
+    - Use **Add a new custom item** on the Add Transaction page for anything not in the lists  
+    - Click **Edit** on any transaction to change or delete it  
     
     Next: Gmail monitoring to auto-mark payments as Paid.
     """)
