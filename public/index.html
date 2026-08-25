@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Paycheck Tracker</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">💰 Paycheck Tracker</div>
+      <nav>
+        <button class="nav-btn active" data-page="current">Current Paycheck</button>
+        <button class="nav-btn" data-page="add">Add Transaction</button>
+        <button class="nav-btn" data-page="past">Past Periods</button>
+        <button class="nav-btn" data-page="search">Search</button>
+        <button class="nav-btn" data-page="settings">Settings</button>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <div id="page-current" class="page active">
+        <div class="page-header">
+          <div>
+            <h1 id="period-label">Loading…</h1>
+            <p class="muted" id="period-dates"></p>
+          </div>
+          <button id="btn-next-period" class="btn secondary">+ Create next period</button>
+        </div>
+
+        <div class="leftover-card">
+          <div class="label">Leftover this paycheck</div>
+          <div class="amount" id="leftover-amount">$0.00</div>
+          <div class="sub" id="leftover-sub"></div>
+        </div>
+
+        <div class="metrics" id="metrics"></div>
+
+        <section class="section">
+          <h2>Items due this period</h2>
+          <div id="auto-items" class="list"></div>
+        </section>
+
+        <section class="section">
+          <h2>Transactions</h2>
+          <div id="pending-list"></div>
+          <div id="paid-list"></div>
+        </section>
+      </div>
+
+      <div id="page-add" class="page">
+        <h1>Add Transaction</h1>
+        <form id="add-form" class="form-card">
+          <div class="row">
+            <label>Date <input type="date" id="add-date" required /></label>
+            <label>Amount <input type="number" id="add-amount" step="0.01" min="0" required /></label>
+          </div>
+          <div class="row">
+            <label>Category
+              <select id="add-category"></select>
+            </label>
+            <label>Subcategory
+              <select id="add-subcategory"></select>
+            </label>
+          </div>
+          <label>Description <input type="text" id="add-desc" /></label>
+          <div class="row">
+            <label>Method
+              <select id="add-method">
+                <option>Credit Card</option>
+                <option>Auto-pay</option>
+                <option>Manual / Bank</option>
+                <option>Cash</option>
+                <option>Other</option>
+              </select>
+            </label>
+            <label>Status
+              <select id="add-status">
+                <option>Pending</option>
+                <option>Paid</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="btn primary full">Save Transaction</button>
+        </form>
+
+        <div class="form-card" style="margin-top:1.5rem">
+          <h3>Add custom item to lists</h3>
+          <div class="row">
+            <label>Category
+              <select id="custom-category"></select>
+            </label>
+            <label>Name <input type="text" id="custom-name" placeholder="e.g. Vet bill" /></label>
+          </div>
+          <button id="btn-add-custom" class="btn secondary">Add to dropdowns</button>
+        </div>
+      </div>
+
+      <div id="page-past" class="page">
+        <h1>Past Periods</h1>
+        <select id="past-select"></select>
+        <div class="leftover-card" style="margin-top:1rem">
+          <div class="label">Leftover</div>
+          <div class="amount" id="past-leftover">$0.00</div>
+        </div>
+        <div class="metrics" id="past-metrics"></div>
+        <div id="past-txns"></div>
+      </div>
+
+      <div id="page-search" class="page">
+        <h1>Search</h1>
+        <input type="text" id="search-input" placeholder="Search subcategory, description, category…" class="search-input" />
+        <select id="search-category"><option value="">All categories</option></select>
+        <div id="search-results"></div>
+      </div>
+
+      <div id="page-settings" class="page">
+        <h1>Settings</h1>
+        <p class="muted">Data is stored in your Neon database. This app is private via Cloudflare Access.</p>
+        <h3>Custom items</h3>
+        <div id="custom-list"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Edit Transaction</h2>
+      <form id="edit-form">
+        <input type="hidden" id="edit-id" />
+        <label>Date <input type="date" id="edit-date" required /></label>
+        <label>Amount <input type="number" id="edit-amount" step="0.01" min="0" required /></label>
+        <label>Category <select id="edit-category"></select></label>
+        <label>Subcategory <select id="edit-subcategory"></select></label>
+        <label>Status
+          <select id="edit-status">
+            <option>Pending</option>
+            <option>Paid</option>
+          </select>
+        </label>
+        <label>Description <input type="text" id="edit-desc" /></label>
+        <div class="modal-actions">
+          <button type="submit" class="btn primary">Save</button>
+          <button type="button" id="edit-cancel" class="btn secondary">Cancel</button>
+          <button type="button" id="edit-delete" class="btn danger">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

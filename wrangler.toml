@@ -1,0 +1,6 @@
+name = "paycheck-tracker"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "public"
+
+[vars]
+# DATABASE_URL will be set in Cloudflare dashboard as a secret

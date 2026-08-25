@@ -1,0 +1,16 @@
+{
+  "name": "paycheck-tracker",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev",
+    "deploy": "wrangler pages deploy"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "hono": "^4.6.12"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}
