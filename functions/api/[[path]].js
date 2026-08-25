@@ -3,7 +3,7 @@ import { neon } from "@neondatabase/serverless";
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
   });
 }
 
@@ -90,12 +90,6 @@ async function ensureTables(sql) {
     category VARCHAR(50) NOT NULL,
     name VARCHAR(100) NOT NULL
   )`;
-
-  const periods = await sql`SELECT id FROM paycheck_periods LIMIT 1`;
-  if (periods.length === 0) {
-    await sql`INSERT INTO paycheck_periods (start_date, end_date, label, is_current)
-      VALUES ('2026-08-14', '2026-08-27', 'Aug 14 – Aug 27', true)`;
-  }
 }
 
 async function getSummary(sql, periodId) {
@@ -114,9 +108,52 @@ export async function onRequest(context) {
   const path = url.pathname.replace(/^\/api/, "") || "/";
   const method = request.method;
 
+  if (method === "OPTIONS") {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
+    });
+  }
+
   try {
     const sql = getSql(env);
     await ensureTables(sql);
+
+    // POST /api/import  — bulk import historical data
+    if (path === "/import" && method === "POST") {
+      const body = await request.json();
+      const periods = body.periods || [];
+      const transactions = body.transactions || [];
+
+      // Clear existing data
+      await sql`DELETE FROM transactions`;
+      await sql`DELETE FROM paycheck_periods`;
+
+      // Insert periods and keep id map
+      const idMap = [];
+      for (const p of periods) {
+        const [row] = await sql`INSERT INTO paycheck_periods (start_date, end_date, label, is_current)
+          VALUES (${p.start}, ${p.end}, ${p.label}, ${!!p.is_current}) RETURNING id`;
+        idMap.push(row.id);
+      }
+
+      // Insert transactions
+      let count = 0;
+      for (const t of transactions) {
+        const periodId = idMap[t.period_idx];
+        if (!periodId) continue;
+        await sql`INSERT INTO transactions
+          (period_id, date, amount, category, subcategory, description, method, status)
+          VALUES (${periodId}, ${t.date}, ${t.amount}, ${t.category}, ${t.subcategory},
+                  ${t.description || null}, ${t.method || "Manual"}, ${t.status || "Paid"})`;
+        count++;
+      }
+
+      return json({ ok: true, periods: periods.length, transactions: count });
+    }
 
     // GET /api/period/current
     if (path === "/period/current" && method === "GET") {
@@ -130,7 +167,6 @@ export async function onRequest(context) {
       const summary = await getSummary(sql, period.id);
       const transactions = await sql`SELECT * FROM transactions WHERE period_id = ${period.id} ORDER BY date DESC`;
 
-      // auto items
       const existing = new Set(
         (await sql`SELECT category, subcategory FROM transactions WHERE period_id = ${period.id}`)
           .map(t => t.category + "|" + t.subcategory)
