@@ -38,6 +38,15 @@ function money(n) {
   return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatDate(d) {
+  if (!d) return "";
+  // Handles both "2026-08-14" and "2026-08-14T00:00:00.000Z"
+  const dateOnly = String(d).slice(0, 10);
+  const [y, m, day] = dateOnly.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${months[parseInt(m,10)-1]} ${parseInt(day,10)}, ${y}`;
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     headers: { "Content-Type": "application/json" },
@@ -102,7 +111,7 @@ async function loadCurrent() {
     currentPeriod = data.period;
     document.getElementById("period-label").textContent = data.period.label;
     document.getElementById("period-dates").textContent =
-      `${data.period.start_date} → ${data.period.end_date}`;
+      `${formatDate(data.period.start_date)} → ${formatDate(data.period.end_date)}`;
 
     const s = data.summary;
     const el = document.getElementById("leftover-amount");
@@ -157,7 +166,7 @@ function renderTxns(txns) {
 
 function txnRow(t, showPaid) {
   return `<div class="item">
-    <div class="date">${t.date?.slice(5) || ""}</div>
+    <div class="date">${formatDate(t.date).replace(/, \d{4}$/, "")}</div>
     <div class="name">${t.subcategory}<div class="cat">${t.category}</div></div>
     <div class="amount">${money(t.amount)}</div>
     <div class="actions">
@@ -173,7 +182,7 @@ window.addAuto = async (i, cat, sub, ptype) => {
     method: "POST",
     body: JSON.stringify({
       period_id: currentPeriod.id,
-      date: currentPeriod.start_date,
+      date: String(currentPeriod.start_date).slice(0, 10),
       amount: amt,
       category: cat,
       subcategory: sub,
@@ -193,7 +202,7 @@ window.addAllAuto = async () => {
       method: "POST",
       body: JSON.stringify({
         period_id: currentPeriod.id,
-        date: currentPeriod.start_date,
+        date: String(currentPeriod.start_date).slice(0, 10),
         amount: amt,
         category: item.category,
         subcategory: item.subcategory,
@@ -214,7 +223,7 @@ window.markPaid = async (id) => {
 window.openEdit = async (id) => {
   const t = await api("/transactions/" + id);
   document.getElementById("edit-id").value = t.id;
-  document.getElementById("edit-date").value = t.date;
+  document.getElementById("edit-date").value = String(t.date).slice(0, 10);
   document.getElementById("edit-amount").value = t.amount;
   fillSelect(document.getElementById("edit-category"), Object.keys(categories), t.category);
   updateSubSelect("edit");
@@ -324,7 +333,7 @@ async function showPast(id) {
   document.getElementById("past-metrics").innerHTML = ["Income","Bills","Debt","Expenses","Savings"]
     .map(k => `<div class="metric"><div class="label">${k}</div><div class="value">${money(s[k])}</div></div>`).join("");
   document.getElementById("past-txns").innerHTML = (data.transactions || [])
-    .map(t => `<div class="item"><div class="date">${t.date?.slice(5)}</div><div class="name">${t.subcategory}</div><div class="amount">${money(t.amount)}</div><div class="cat">${t.status}</div></div>`)
+    .map(t => `<div class="item"><div class="date">${formatDate(t.date).replace(/, \d{4}$/, "")}</div><div class="name">${t.subcategory}</div><div class="amount">${money(t.amount)}</div><div class="cat">${t.status}</div></div>`)
     .join("") || `<p class="muted">No transactions</p>`;
 }
 
@@ -347,7 +356,7 @@ async function doSearch() {
   if (cat) params.set("category", cat);
   const results = await api("/search?" + params);
   document.getElementById("search-results").innerHTML = results.length
-    ? results.map(t => `<div class="item"><div class="date">${t.date?.slice(5)}</div><div class="name">${t.subcategory}<div class="cat">${t.category}</div></div><div class="amount">${money(t.amount)}</div></div>`).join("")
+    ? results.map(t => `<div class="item"><div class="date">${formatDate(t.date).replace(/, \d{4}$/, "")}</div><div class="name">${t.subcategory}<div class="cat">${t.category}</div></div><div class="amount">${money(t.amount)}</div></div>`).join("")
     : `<p class="muted">No results</p>`;
 }
 
