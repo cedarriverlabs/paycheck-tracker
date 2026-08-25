@@ -1,3 +1,45 @@
+// Simple password gate
+const APP_PASSWORD = "change-me"; // change this later if you want
+
+function isUnlocked() {
+  return sessionStorage.getItem("paycheck_unlocked") === "1";
+}
+
+function unlock() {
+  sessionStorage.setItem("paycheck_unlocked", "1");
+  document.getElementById("login-screen").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  loadCategories().then(loadCurrent);
+}
+
+function lock() {
+  sessionStorage.removeItem("paycheck_unlocked");
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("login-screen").classList.remove("hidden");
+  document.getElementById("login-password").value = "";
+  document.getElementById("login-error").classList.add("hidden");
+}
+
+document.getElementById("login-btn").onclick = () => {
+  const pw = document.getElementById("login-password").value;
+  if (pw === APP_PASSWORD) {
+    unlock();
+  } else {
+    document.getElementById("login-error").classList.remove("hidden");
+  }
+};
+
+document.getElementById("login-password").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("login-btn").click();
+});
+
+document.getElementById("logout-btn").onclick = lock;
+
+// If already unlocked this session, show the app
+if (isUnlocked()) {
+  unlock();
+}
+
 const API = "/api";
 
 const BASE_CATEGORIES = {
@@ -40,7 +82,6 @@ function money(n) {
 
 function formatDate(d) {
   if (!d) return "";
-  // Handles both "2026-08-14" and "2026-08-14T00:00:00.000Z"
   const dateOnly = String(d).slice(0, 10);
   const [y, m, day] = dateOnly.split("-");
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -104,7 +145,6 @@ function updateSubSelect(prefix) {
 document.getElementById("add-category")?.addEventListener("change", () => updateSubSelect("add"));
 document.getElementById("edit-category")?.addEventListener("change", () => updateSubSelect("edit"));
 
-// Load current period
 async function loadCurrent() {
   try {
     const data = await api("/period/current");
@@ -123,7 +163,6 @@ async function loadCurrent() {
     document.getElementById("metrics").innerHTML = ["Income","Bills","Debt","Expenses","Savings"]
       .map(k => `<div class="metric"><div class="label">${k}</div><div class="value">${money(s[k])}</div></div>`).join("");
 
-    // Auto items
     const auto = data.auto_items || [];
     const autoEl = document.getElementById("auto-items");
     if (!auto.length) {
@@ -139,7 +178,6 @@ async function loadCurrent() {
       window._auto = auto;
     }
 
-    // Transactions
     renderTxns(data.transactions || []);
   } catch (e) {
     console.error(e);
@@ -268,7 +306,6 @@ document.getElementById("btn-next-period").onclick = async () => {
   loadCurrent();
 };
 
-// Add form
 document.getElementById("add-form").onsubmit = async (e) => {
   e.preventDefault();
   await api("/transactions", {
@@ -344,7 +381,6 @@ async function loadSettings() {
     : `<p class="muted">None yet</p>`;
 }
 
-// Search
 document.getElementById("search-input")?.addEventListener("input", doSearch);
 document.getElementById("search-category")?.addEventListener("change", doSearch);
 
@@ -360,6 +396,4 @@ async function doSearch() {
     : `<p class="muted">No results</p>`;
 }
 
-// Init
 document.getElementById("add-date").valueAsDate = new Date();
-loadCategories().then(loadCurrent);
