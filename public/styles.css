@@ -22,6 +22,38 @@ body {
   line-height: 1.5;
 }
 
+.hidden { display: none !important; }
+
+/* Login */
+#login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.login-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+}
+.login-box h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+.login-box input {
+  width: 100%;
+  margin: 1rem 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+}
+.login-box .error { color: var(--danger); font-size: 0.9rem; margin-top: 0.75rem; }
+
 #app {
   display: flex;
   min-height: 100vh;
@@ -133,7 +165,7 @@ h3 { font-size: 1rem; margin-bottom: 0.5rem; }
   padding: 0.75rem 1rem;
 }
 
-.item .date { color: var(--muted); width: 60px; flex-shrink: 0; font-size: 0.9rem; }
+.item .date { color: var(--muted); width: 70px; flex-shrink: 0; font-size: 0.9rem; }
 .item .name { flex: 1; font-weight: 500; }
 .item .cat { color: var(--muted); font-size: 0.8rem; }
 .item .amount { font-weight: 600; width: 90px; text-align: right; }
@@ -231,7 +263,7 @@ input:focus, select:focus {
 
 @media (max-width: 700px) {
   #app { flex-direction: column; }
-  .sidebar { width: 100%; flex-direction: row; overflow-x: auto; padding: 0.75rem; }
+  .sidebar { width: 100%; flex-direction: row; overflow-x: auto; padding: 0.75rem; flex-wrap: wrap; }
   .brand { display: none; }
   .nav-btn { white-space: nowrap; }
   .content { padding: 1.25rem 1rem; }
