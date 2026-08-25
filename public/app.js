@@ -44,8 +44,12 @@ async function api(path, opts = {}) {
     ...opts
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || res.statusText);
+    let errText = await res.text();
+    try {
+      const j = JSON.parse(errText);
+      errText = j.error || errText;
+    } catch {}
+    throw new Error(errText || res.statusText);
   }
   return res.json();
 }
@@ -131,6 +135,8 @@ async function loadCurrent() {
   } catch (e) {
     console.error(e);
     document.getElementById("period-label").textContent = "Error loading data";
+    document.getElementById("period-dates").textContent = String(e.message || e);
+    document.getElementById("leftover-amount").textContent = "—";
   }
 }
 
