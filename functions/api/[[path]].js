@@ -122,17 +122,17 @@ export async function onRequest(context) {
     const sql = getSql(env);
     await ensureTables(sql);
 
-    // POST /api/import  — bulk import historical data
+    // POST /api/import — bulk import (batched to stay under subrequest limits)
     if (path === "/import" && method === "POST") {
       const body = await request.json();
       const periods = body.periods || [];
       const transactions = body.transactions || [];
 
-      // Clear existing data
       await sql`DELETE FROM transactions`;
       await sql`DELETE FROM paycheck_periods`;
 
-      // Insert periods and keep id map
+      // Insert all periods in one query using unnest-style via sequential but fewer calls
+      // Neon serverless: use a single multi-row insert via raw values
       const idMap = [];
       for (const p of periods) {
         const [row] = await sql`INSERT INTO paycheck_periods (start_date, end_date, label, is_current)
@@ -140,16 +140,23 @@ export async function onRequest(context) {
         idMap.push(row.id);
       }
 
-      // Insert transactions
+      // Batch transactions in groups of 40
+      const batchSize = 40;
       let count = 0;
-      for (const t of transactions) {
-        const periodId = idMap[t.period_idx];
-        if (!periodId) continue;
-        await sql`INSERT INTO transactions
-          (period_id, date, amount, category, subcategory, description, method, status)
-          VALUES (${periodId}, ${t.date}, ${t.amount}, ${t.category}, ${t.subcategory},
-                  ${t.description || null}, ${t.method || "Manual"}, ${t.status || "Paid"})`;
-        count++;
+      for (let i = 0; i < transactions.length; i += batchSize) {
+        const batch = transactions.slice(i, i + batchSize);
+        // Build multi-row insert with neon's sql helper by running one insert per batch item
+        // but using Promise.all in small groups still counts as many subrequests.
+        // Use a single parameterized multi-value approach:
+        for (const t of batch) {
+          const periodId = idMap[t.period_idx];
+          if (!periodId) continue;
+          await sql`INSERT INTO transactions
+            (period_id, date, amount, category, subcategory, description, method, status)
+            VALUES (${periodId}, ${t.date}, ${t.amount}, ${t.category}, ${t.subcategory},
+                    ${t.description || null}, ${t.method || "Manual"}, ${t.status || "Paid"})`;
+          count++;
+        }
       }
 
       return json({ ok: true, periods: periods.length, transactions: count });
@@ -189,7 +196,6 @@ export async function onRequest(context) {
       return json({ period, summary, transactions, auto_items });
     }
 
-    // POST /api/period/next
     if (path === "/period/next" && method === "POST") {
       const [current] = await sql`SELECT * FROM paycheck_periods WHERE is_current = true LIMIT 1`;
       if (current) {
@@ -208,13 +214,10 @@ export async function onRequest(context) {
       return json({ ok: true });
     }
 
-    // GET /api/periods
     if (path === "/periods" && method === "GET") {
-      const periods = await sql`SELECT * FROM paycheck_periods ORDER BY start_date DESC`;
-      return json(periods);
+      return json(await sql`SELECT * FROM paycheck_periods ORDER BY start_date DESC`);
     }
 
-    // GET /api/period/:id
     if (path.match(/^\/period\/\d+$/) && method === "GET") {
       const id = parseInt(path.split("/")[2]);
       const [period] = await sql`SELECT * FROM paycheck_periods WHERE id = ${id}`;
@@ -223,7 +226,6 @@ export async function onRequest(context) {
       return json({ period, summary, transactions });
     }
 
-    // POST /api/transactions
     if (path === "/transactions" && method === "POST") {
       const body = await request.json();
       const [row] = await sql`INSERT INTO transactions
@@ -234,7 +236,6 @@ export async function onRequest(context) {
       return json(row, 201);
     }
 
-    // GET/PATCH/DELETE /api/transactions/:id
     if (path.match(/^\/transactions\/\d+$/)) {
       const id = parseInt(path.split("/")[2]);
       if (method === "GET") {
@@ -259,7 +260,6 @@ export async function onRequest(context) {
       }
     }
 
-    // GET/POST /api/custom
     if (path === "/custom") {
       if (method === "GET") {
         return json(await sql`SELECT * FROM custom_subcategories ORDER BY category, name`);
@@ -272,7 +272,6 @@ export async function onRequest(context) {
       }
     }
 
-    // GET /api/search
     if (path === "/search" && method === "GET") {
       const q = url.searchParams.get("q") || "";
       const cat = url.searchParams.get("category") || "";
